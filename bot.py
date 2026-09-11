@@ -2,15 +2,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 import os
-import random
 import time
+import random
 import aiosqlite
-import aiohttp
 from flask import Flask
 from threading import Thread
 
 # ==========================================
-# CHANGE THIS NUMBER TO YOUR SERVER ID
+# 🛑 PUT YOUR EXACT DISCORD SERVER ID HERE
 # ==========================================
 MY_SERVER_ID = 1547705148355248200  
 
@@ -21,7 +20,6 @@ def home():
     return "Speedy AI Operational."
 
 def run_web_server():
-    # 🚀 THE DIRECT FIX: Bind strictly to the exact port Render scans for
     port = int(os.getenv("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
@@ -38,15 +36,7 @@ class SpeedyAI(commands.Bot):
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS service_records (
                     user_id INTEGER PRIMARY KEY, mid TEXT UNIQUE, joined_timestamp REAL,
-                    override_duration TEXT, training_phase TEXT DEFAULT 'Phase 1', gamertag TEXT,
-                    accuracy REAL DEFAULT 50.0, positioning INTEGER DEFAULT 50,
-                    teamwork INTEGER DEFAULT 50, slayer_output INTEGER DEFAULT 50, comms_focus INTEGER DEFAULT 50
-                )
-            """)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS traits (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
-                    trait_type TEXT, description TEXT, date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    override_duration TEXT, training_phase TEXT DEFAULT 'Phase 1', gamertag TEXT
                 )
             """)
             await db.commit()
@@ -54,63 +44,76 @@ class SpeedyAI(commands.Bot):
         guild_target = discord.Object(id=MY_SERVER_ID)
         self.tree.copy_global_to(guild=guild_target)
         await self.tree.sync(guild=guild_target)
-        weekly_readiness_report.start()
 
 bot = SpeedyAI()
 
-def generate_mid(display_name: str) -> str:
-    digits1 = f"{random.randint(100, 999)}"
-    digits2 = f"{random.randint(100, 999)}"
-    words = display_name.split()
-    initials = "".join([w[0] for w in words[:2]]).upper() if len(words) >= 1 else "ST"
-    return f"{digits1}-{digits2}-{initials}"
+@bot.event
+async def on_ready():
+    print(f"🤖 Speedy connected as: {bot.user}")
 
-def evaluate_tactical_patterns(kills: int, deaths: int, accuracy: float, team_avg_kd: float) -> dict:
-    kd = kills / max(deaths, 1)
-    stats = {"accuracy": 50, "positioning": 50, "teamwork": 50}
-    directives = []
+@bot.event
+async def on_member_update(before, after):
+    odst_role = "O.D.S.T"
+    if not any(r.name == odst_role for r in before.roles) and any(r.name == odst_role for r in after.roles):
+        digits1 = random.randint(100, 999)
+        digits2 = random.randint(100, 999)
+        words = after.display_name.split()
+        initials = "".join([w[0] for w in words[:2]]).upper() if len(words) >= 1 else "ST"
+        mid = f"{digits1}-{digits2}-{initials}"
+        
+        async with aiosqlite.connect("speedy_ai.db") as db:
+            await db.execute("INSERT OR IGNORE INTO service_records (user_id, mid, joined_timestamp) VALUES (?, ?, ?)", (after.id, mid, time.time()))
+            await db.commit()
 
-    if accuracy < 42.0:
-        stats["accuracy"] = 35
-        directives.append("⚠️ **[LIVE-FIRE MANDATE]**: Accuracy low. Report to the shooting range for tracking drills.")
+@bot.tree.command(name="service_record", description="Review an ODST history profile.")
+async def service_record(interaction: discord.Interaction, member: discord.Member = None):
+    target = member or interaction.user
+    async with aiosqlite.connect("speedy_ai.db") as db:
+        async with db.execute("SELECT * FROM service_records WHERE user_id = ?", (target.id,)) as cursor:
+            row = await cursor.fetchone()
+            
+    if not row:
+        await interaction.response.send_message("📁 No profile found. User must have the O.D.S.T role.", ephemeral=True)
+        return
+        
+    user_id, mid, joined_time, override_duration, phase, gamertag = row
+    time_str = override_duration if override_duration else f"{int((time.time() - joined_time) // 2592000)} Months"
+    
+    embed = discord.Embed(title=f"🪖 ODST PROFILE // {target.display_name.upper()}", color=0x3498db)
+    embed.add_field(name="🆔 Marine ID", value=f"`{mid}`", inline=True)
+    embed.add_field(name="⏳ Time in Service", value=time_str, inline=True)
+    embed.add_field(name="📈 Status", value=f"`{phase}`", inline=True)
+    embed.add_field(name="🎮 Gamertag", value=f"`{gamertag or 'UNLINKED'}`", inline=True)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="register_gamertag", description="Link your Xbox Live Gamertag.")
+async def register_gamertag(interaction: discord.Interaction, gamertag: str):
+    async with aiosqlite.connect("speedy_ai.db") as db:
+        await db.execute("UPDATE service_records SET gamertag = ? WHERE user_id = ?", (gamertag, interaction.user.id))
+        await db.commit()
+    await interaction.response.send_message(f"📡 Syncing complete for gamertag: `{gamertag}`.", ephemeral=True)
+
+@bot.tree.command(name="service_record_override", description="Override record attributes.")
+async def service_record_override(interaction: discord.Interaction, member: discord.Member, new_time: str = None, phase: str = None):
+    allowed_roles = ["Sergeant", "Lieutenant", "Captain", "Admin", "Staff"]
+    if not any(r.name in allowed_roles for r in interaction.user.roles) and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ [ACCESS DENIED]: Clearance Sergeant required.", ephemeral=True)
+        return
+        
+    async with aiosqlite.connect("speedy_ai.db") as db:
+        if new_time:
+            await db.execute("UPDATE service_records SET override_duration = ? WHERE user_id = ?", (new_time, member.id))
+        if phase:
+            await db.execute("UPDATE service_records SET training_phase = ? WHERE user_id = ?", (phase, member.id))
+        await db.commit()
+    await interaction.response.send_message(f"✅ Record updated successfully for {member.display_name}.", ephemeral=True)
+
+if __name__ == "__main__":
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    if TOKEN:
+        t = Thread(target=run_web_server)
+        t.daemon = True
+        t.start()
+        bot.run(TOKEN)
     else:
-        stats["accuracy"] = 75
-
-    if kills >= 15 and deaths >= 15:
-        stats["positioning"] = 35
-        directives.append("🛡️ **[TACTICAL RE-ROUTE]**: High output negated by high deaths. Switch to conservative anchoring.")
-    elif kills < 8 and deaths >= 12:
-        stats["positioning"] = 25
-        directives.append("👥 **[FIRETEAM COHESION CRITICAL]**: Vulnerable isolation. Move with team and clear corners.")
-    elif kd >= 1.5 and team_avg_kd < 0.9:
-        stats["teamwork"] = 35
-        directives.append("🤝 **[COORDINATION REQUIRED]**: Lone Wolf habits. Assist struggling squad mates.")
-    else:
-        directives.append("🎯 **[SYSTEM NOMINAL]**: Metrics align with fleet standards. Maintain current rotation.")
-
-    return {"stats": stats, "directives": "\n\n".join(directives)}
-
-async def fetch_halo_match_metrics(gamertag: str) -> dict:
-    url = f"https://halodatahive.com{gamertag}/recent_summary"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return {
-                        "kills": int(data.get("average_kills", 12)), "deaths": int(data.get("average_deaths", 11)),
-                        "accuracy": float(data.get("shot_accuracy", 41.5)), "team_avg_kd": float(data.get("team_kd", 0.95))
-                    }
-    except:
-        pass
-    return {"kills": 14, "deaths": 15, "accuracy": 39.8, "team_avg_kd": 0.85}
-
-def is_sergeant_plus():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        allowed = ["Sergeant", "Lieutenant", "Captain", "Admin", "Staff"]
-        if any(r.name in allowed for r in interaction.user.roles) or interaction.user.guild_permissions.administrator:
-            return True
-        await interaction.response.send_message("❌ [ACCESS DENIED]: Requires Sergeant clearance.", ephemeral=True)
-        return False
-    return app_commands.check(predicate)
-
+        print("❌ CRITICAL ERROR: DISCORD_TOKEN variable missing.")
