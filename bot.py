@@ -8,10 +8,10 @@ import aiohttp
 import os
 from flask import Flask
 from threading import Thread
-from datetime import datetime
 
-# --- 1. CONFIGURATION CONFIG & 24/7 KEEP-ALIVE ---
-# Change this number to your exact Discord Server ID so commands load instantly!
+# ==========================================
+# CHANGE THIS NUMBER TO YOUR SERVER ID
+# ==========================================
 MY_SERVER_ID = 123456789012345678  
 
 app = Flask('')
@@ -24,12 +24,10 @@ def run_web_server():
     app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
-    """Spins up a lightweight web page thread to prevent Render from going to sleep."""
     t = Thread(target=run_web_server)
     t.daemon = True
     t.start()
 
-# --- 2. CORE BOT ROUTINES ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
@@ -39,7 +37,6 @@ class SpeedyAI(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         
     async def setup_hook(self):
-        # Establish structural local databases
         async with aiosqlite.connect("speedy_ai.db") as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS service_records (
@@ -57,19 +54,14 @@ class SpeedyAI(commands.Bot):
             """)
             await db.commit()
             
-        # 🚀 NEW CODE: Instant Server Slash Command Sync Configuration
         guild_target = discord.Object(id=MY_SERVER_ID)
         self.tree.copy_global_to(guild=guild_target)
         await self.tree.sync(guild=guild_target)
-        
-        # Launch the automated 7-day tactical analysis scanning wheel
         weekly_readiness_report.start()
 
 bot = SpeedyAI()
 
-# --- 3. PATTERN EVALUATION LOGIC & UTILITIES ---
 def generate_mid(display_name: str) -> str:
-    """Generates an immersion Marine Identification Number (XXX-XXX-XX)."""
     digits1 = f"{random.randint(100, 999)}"
     digits2 = f"{random.randint(100, 999)}"
     words = display_name.split()
@@ -82,7 +74,6 @@ def generate_mid(display_name: str) -> str:
     return f"{digits1}-{digits2}-{initials}"
 
 def evaluate_tactical_patterns(kills: int, deaths: int, accuracy: float, team_avg_kd: float) -> dict:
-    """Pattern matching engine: Diagnoses specific player errors based on stats."""
     kd = kills / max(deaths, 1)
     stats = {"accuracy": 50, "positioning": 50, "teamwork": 50, "slayer_output": 50, "comms_focus": 50}
     directives = []
@@ -111,7 +102,6 @@ def evaluate_tactical_patterns(kills: int, deaths: int, accuracy: float, team_av
     return {"stats": stats, "directives": "\n\n".join(directives)}
 
 async def fetch_halo_match_metrics(gamertag: str) -> dict:
-    """Safely reads stats from free open community relays with fallback protections."""
     url = f"https://halodatahive.com{gamertag}/recent_summary"
     try:
         async with aiohttp.ClientSession() as session:
@@ -129,7 +119,6 @@ async def fetch_halo_match_metrics(gamertag: str) -> dict:
     return {"kills": 14, "deaths": 15, "accuracy": 39.8, "team_avg_kd": 0.85}
 
 def is_sergeant_plus():
-    """Security verification lock to limit administrative adjustments to Sergeant and above."""
     async def predicate(interaction: discord.Interaction) -> bool:
         allowed_roles = ["Sergeant", "Lieutenant", "Captain", "Admin", "Staff"]
         has_role = any(role.name in allowed_roles for role in interaction.user.roles)
@@ -139,10 +128,12 @@ def is_sergeant_plus():
         return False
     return app_commands.check(predicate)
 
-# --- 4. DISCORD COMMAND AND INTERFACE LOGIC ---
+@bot.event
+async def on_ready():
+    print(f"🤖 Connected successfully as: {bot.user}")
+
 @bot.event
 async def on_member_update(before, after):
-    """Automatically assigns profiles and structural Marine Identification Numbers."""
     odst_role_name = "O.D.S.T"
     had_role = any(r.name == odst_role_name for r in before.roles)
     has_role = any(r.name == odst_role_name for r in after.roles)
@@ -165,7 +156,7 @@ async def service_record(interaction: discord.Interaction, member: discord.Membe
                 await interaction.response.send_message("📁 Profile uninitialized. Target must possess the O.D.S.T role.", ephemeral=True)
                 return
             
-            _, mid, joined_time, override_duration, phase, gamertag, acc, pos, team, slay, comms = row
+            user_id, mid, joined_time, override_duration, phase, gamertag, acc, pos, team, slay, comms = row
             
             if override_duration:
                 time_in_service = override_duration
@@ -204,3 +195,14 @@ async def register_gamertag(interaction: discord.Interaction, gamertag: str):
     async with aiosqlite.connect("speedy_ai.db") as db:
         async with db.execute("SELECT user_id FROM service_records WHERE user_id = ?", (user.id,)) as cursor:
             if await cursor.fetchone() is None:
+                await interaction.response.send_message("❌ [ACCESS DENIED]: Profile uninitialized. Missing O.D.S.T assignment.", ephemeral=True)
+                return
+        await db.execute("UPDATE service_records SET gamertag = ? WHERE user_id = ?", (gamertag, user.id))
+        await db.commit()
+    await interaction.response.send_message(f"📡 **[LINK ESTABLISHED]**: Gamertag `{gamertag}` synced to data channels.", ephemeral=True)
+
+@bot.tree.command(name="service_record_override", description="Override parameters (Requires Sergeant Clearance).")
+@is_sergeant_plus()
+async def service_record_override(interaction: discord.Interaction, member: discord.Member, new_time: str = None, phase: str = None, gamertag: str = None):
+    async with aiosqlite.connect("speedy_ai.db") as db:
+        if new_time:
