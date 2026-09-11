@@ -21,7 +21,8 @@ def home():
     return "Speedy AI Shipboard Interface Operational."
 
 def run_web_server():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.getenv("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 intents = discord.Intents.default()
 intents.members = True
