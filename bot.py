@@ -21,7 +21,8 @@ def home():
     return "Speedy AI Operational."
 
 def run_web_server():
-    port = int(os.getenv("PORT", 8080))
+    # 🚀 THE DIRECT FIX: Bind strictly to the exact port Render scans for
+    port = int(os.getenv("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 intents = discord.Intents.default()
