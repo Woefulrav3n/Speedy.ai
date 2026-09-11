@@ -206,3 +206,10 @@ async def register_gamertag(interaction: discord.Interaction, gamertag: str):
 async def service_record_override(interaction: discord.Interaction, member: discord.Member, new_time: str = None, phase: str = None, gamertag: str = None):
     async with aiosqlite.connect("speedy_ai.db") as db:
         if new_time:
+            await db.execute("UPDATE service_records SET override_duration = ? WHERE user_id = ?", (new_time, member.id))
+        if phase:
+            await db.execute("UPDATE service_records SET training_phase = ? WHERE user_id = ?", (phase, member.id))
+        if gamertag:
+            await db.execute("UPDATE service_records SET gamertag = ? WHERE user_id = ?", (gamertag, member.id))
+        await db.commit()
+    await interaction.response.send_message(f"✅ Data override structural injection successful for {member.display_name}.", ephemeral=True)
